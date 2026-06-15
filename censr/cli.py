@@ -10,27 +10,41 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-AUDIO_EXT = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma", ".mp4", ".mkv", ".webm"}
+from .settings import AUDIO_EXT, DEFAULT_SUFFIX
 
 
 def _parse_tracks(spec: str | None) -> list[int] | None:
-    """'all'/пусто → None (все дорожки). '1,3' → [0,2] (1-based на вход, 0-based наружу)."""
+    """'all'/пусто → None (все дорожки). '1,3' → [0,2] (1-based на вход, 0-based наружу).
+
+    Мусор и 0 — ошибка (ValueError), а не молчаливое «обработать все дорожки»."""
     if not spec or spec.strip().lower() == "all":
         return None
-    out = [int(p) - 1 for p in spec.split(",") if p.strip().isdigit() and int(p) >= 1]
+    out: list[int] = []
+    for p in spec.split(","):
+        p = p.strip()
+        if not p.isdigit() or int(p) < 1:
+            raise ValueError("--track: «%s» — нужен номер дорожки от 1 (или all)" % p)
+        out.append(int(p) - 1)
     return out or None
 
 
 def main() -> int:
+    for stream in (sys.stdout, sys.stderr):     # перенаправленный вывод на Windows — cp1251:
+        try:                                    # имя файла с эмодзи роняло print весь батч
+            stream.reconfigure(errors="replace")
+        except Exception:
+            pass
     ap = argparse.ArgumentParser(prog="censr", description="Удаление мата из аудио")
     ap.add_argument("inputs", nargs="+", help="файлы или папки")
     ap.add_argument("-o", "--out-dir", default=None, help="выходная папка (по умолчанию из настроек / рядом)")
-    ap.add_argument("--suffix", default="_censr")
-    ap.add_argument("--beep", action="store_true", help="бип вместо тишины")
-    ap.add_argument("--noise", action="store_true", help="негромкий шум вместо тишины")
+    ap.add_argument("--suffix", default=DEFAULT_SUFFIX)
+    grp = ap.add_mutually_exclusive_group()
+    grp.add_argument("--beep", action="store_true", help="бип вместо тишины")
+    grp.add_argument("--noise", action="store_true", help="негромкий шум вместо тишины")
     ap.add_argument("--model-path", default=None)
     ap.add_argument("--no-cache", action="store_true",
                     help="не использовать кэш транскрипта (всегда заново распознавать)")
@@ -42,17 +56,25 @@ def main() -> int:
     ap.add_argument("--thorough", action="store_true",
                     help="тщательная очистка: несколько проходов распознавания (медленнее)")
     args = ap.parse_args()
-    tracks = _parse_tracks(args.track)
+    try:
+        tracks = _parse_tracks(args.track)
+    except ValueError as e:
+        ap.error(str(e))                      # код возврата 2, как принято у argparse
 
+    rc = 0
     files: list[Path] = []
     for inp in args.inputs:
         p = Path(inp)
         if p.is_dir():
-            files += [f for f in sorted(p.rglob("*")) if f.suffix.lower() in AUDIO_EXT]
+            files += [f for f in sorted(p.rglob("*"))
+                      if f.suffix.lower() in AUDIO_EXT
+                      # не подбирать собственные выходы прошлых запусков
+                      and not (args.suffix and f.stem.endswith(args.suffix))]
         elif p.exists():
             files.append(p)
         else:
             print(f"не найдено: {p}", file=sys.stderr)
+            rc = 1                              # опечатка в пути не должна давать код 0
     if not files:
         print("нет входных файлов", file=sys.stderr)
         return 1
@@ -77,21 +99,42 @@ def main() -> int:
     except ModuleNotFoundError as e:
         print(f"Не установлен модуль «{e.name}». Выполни: pip install -r requirements.txt", file=sys.stderr)
         return 1
+    except Exception as e:
+        print("Не удалось загрузить модель распознавания: %s\n"
+              "Проверь папку модели (models/gigaam-v3-onnx) или --model-path." % e,
+              file=sys.stderr)
+        return 1
     det = ProfanityDetector(extra_words=set(s.extra_words), whitelist=set(s.whitelist))
 
-    rc = 0
-    for f in files:
+    used: set[str] = set()                     # выходы этого запуска: a/x.mp3 и b/x.mp3
+    for f in files:                            # при общем -o не должны затирать друг друга
         out_dir = Path(out_root) if out_root else f.parent
         dst = out_dir / f"{f.stem}{args.suffix}{f.suffix}"
+        base, k = dst, 2
+        # дедуп по РЕАЛЬНОМУ пути: один и тот же файл, поданный двумя путями
+        # (абс./отн.), иначе дал бы два «разных» dst в одну точку — второй затёр бы первый
+        while os.path.normcase(str(dst.resolve())) in used:
+            dst = base.with_name(f"{base.stem} ({k}){base.suffix}")
+            k += 1
+        used.add(os.path.normcase(str(dst.resolve())))
+        if dst.resolve() == f.resolve():       # --suffix "" без -o: не дать затереть исходник
+            print(f"{f.name}: выход совпадает с исходником — пропущено "
+                  f"(укажи -o или непустой --suffix)", file=sys.stderr)
+            rc = 1
+            continue
         try:
             rep = censor_file(f, dst, tr, det, mode=mode, zone_params=zone_params,
                               use_cache=use_cache, tracks=tracks, max_passes=max_passes)
-        except AudioError as e:
+        except (AudioError, OSError) as e:
             print(f"{f.name}: ошибка — {e}", file=sys.stderr)
             rc = 1
             continue
-        dst.with_suffix(".report.json").write_text(
-            json.dumps(rep.to_dict(), ensure_ascii=False, indent=1), encoding="utf-8")
+        if s.write_report:                     # как в GUI — отчёт пишется по настройке
+            try:                               # сбой записи отчёта НЕ роняет успешную цензуру
+                dst.with_suffix(".report.json").write_text(
+                    json.dumps(rep.to_dict(), ensure_ascii=False, indent=1), encoding="utf-8")
+            except OSError as e:
+                print(f"{f.name}: предупреждение — отчёт не записан ({e})", file=sys.stderr)
         print(f"{f.name}: {rep.flagged_words} матных слов заглушено -> {dst}")
     return rc
 

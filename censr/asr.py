@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import tempfile
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,13 +31,14 @@ def tokens_to_words(tokens: list[str], timestamps: list[float],
     import math
     words: list[Word] = []
     cur, start, end, lps, cts = "", 0.0, 0.0, [], []
+    have_lp = logprobs is not None       # нет logprobs → уверенность неизвестна (None, не 1.0)
     if logprobs is None:
         logprobs = [0.0] * len(tokens)
-    for tok, ts, lp in zip(tokens, timestamps, logprobs):
+    for tok, ts, lp in zip(tokens, timestamps, logprobs, strict=False):
         clean = tok.replace("▁", " ").strip()
         if clean == "":
             if cur:
-                words.append(Word(cur, start, end, round(math.exp(sum(lps) / len(lps)), 3), cts))
+                words.append(Word(cur, start, end, round(math.exp(sum(lps) / len(lps)), 3) if have_lp else None, cts))
                 cur, lps, cts = "", [], []
             continue
         if cur == "":
@@ -49,8 +48,28 @@ def tokens_to_words(tokens: list[str], timestamps: list[float],
         end = ts
         lps.append(lp)
     if cur:
-        words.append(Word(cur, start, end, round(math.exp(sum(lps) / len(lps)), 3), cts))
+        words.append(Word(cur, start, end, round(math.exp(sum(lps) / len(lps)), 3) if have_lp else None, cts))
     return words
+
+
+VAD_RMS = 1e-3   # порог «нет сигнала»: max RMS 0.2-с окна ниже (≈ −60 дБFS)
+
+
+def _is_silent(seg: np.ndarray, win_s: float = 0.2, thr: float = VAD_RMS) -> bool:
+    """Дешёвый VAD-гейт: True — в чанке нет окна громче порога (тишина/фон),
+    модель можно не звать. Порог консервативный: шёпот заметно громче −60 дБ."""
+    if not len(seg):
+        return True
+    win = max(int(win_s * SR), 1)
+    k = len(seg) // win
+    m = 0.0
+    if k:
+        rms = np.sqrt((seg[: k * win].reshape(k, win) ** 2).mean(axis=1))
+        m = float(rms.max())
+    tail = seg[k * win:]
+    if len(tail):
+        m = max(m, float(np.sqrt((tail ** 2).mean())))
+    return m < thr
 
 
 def _quiet_cut(seg: np.ndarray, search_s: float = 4.0, win_s: float = 0.2) -> int:
@@ -67,19 +86,29 @@ def _quiet_cut(seg: np.ndarray, search_s: float = 4.0, win_s: float = 0.2) -> in
     return n - search + j * win + win // 2
 
 
+def model_id_for(model_path: str | None = None, model: str = "gigaam-v3-ctc",
+                 quantization: str | None = "int8") -> str:
+    """Идентификатор модели для ключа кэша — БЕЗ загрузки самой модели.
+
+    Нужен GUI, чтобы читать кэш транскрипта (контекст фраз в «проверке»),
+    не поднимая onnx-runtime."""
+    return "%s|%s|%s" % (model, quantization, model_path or "hub")
+
+
 class Transcriber:
     def __init__(self, model_path: str | None = None, model: str = "gigaam-v3-ctc",
                  quantization: str | None = "int8"):
         import onnx_asr  # noqa: PLC0415
         self._model = onnx_asr.load_model(model, path=model_path, quantization=quantization).with_timestamps()
         # идентификатор модели для ключа кэша транскрипта (см. cache.py)
-        self.model_id = "%s|%s|%s" % (model, quantization, model_path or "hub")
+        self.model_id = model_id_for(model_path, model, quantization)
 
     def transcribe_samples(self, samples: np.ndarray, progress=None, word_cb=None,
-                           cancel=None) -> list[Word]:
+                           cancel=None, vad: bool = True) -> list[Word]:
         """16 кГц mono float32 → слова. progress(done_sec, total_sec) — колбэк.
         word_cb(chunk_words) вызывается после каждого чанка (для счёта мата вживую).
         cancel() → True прерывает обработку (проверяется перед каждым чанком).
+        vad=True — чанки без сигнала (см. _is_silent) модели не отдаются.
 
         Длинный файл режется не по жёсткой сетке, а в самом тихом месте
         последних секунд чанка — чтобы не разрезать слово на границе.
@@ -96,6 +125,11 @@ class Transcriber:
             if not is_last:
                 cut = _quiet_cut(seg)         # тихая точка в хвосте чанка
                 seg = seg[:cut]
+            if vad and _is_silent(seg):       # нет сигнала — чанк не распознаём
+                i += len(seg) if len(seg) else max_chunk
+                if progress:
+                    progress(min(i / SR, total), total)
+                continue
             # обычный чанк — от 0.25 c; последний короткий хвост (>=50 мс) дополняем
             # тишиной до 0.25 c, чтобы не терять речь в самом конце файла
             if len(seg) >= SR // 4 or (is_last and len(seg) >= SR // 20):
@@ -122,12 +156,12 @@ class Transcriber:
 
     def transcribe_file(self, path: str | Path, progress=None, word_cb=None, cancel=None,
                         audio_index: int = 0) -> list[Word]:
-        from .audio import _run_ff  # понятная ошибка, если нет ffmpeg
-        with tempfile.TemporaryDirectory() as td:
-            wav = Path(td) / "a.wav"
-            _run_ff(["ffmpeg", "-y", "-v", "quiet", "-i", str(path),
-                     "-map", "0:a:%d" % audio_index,
-                     "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(wav)])
-            with wave.open(str(wav), "rb") as w:
-                samples = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
+        from .audio import run_ff  # понятная ошибка, если нет ffmpeg
+        # f32le сразу в пайп: без временного wav на диске (запись+чтение ~230 МБ
+        # на 2-часовом файле) и без int16-квантования по дороге к модели
+        out = run_ff(["ffmpeg", "-v", "error", "-i", str(path),
+                      "-map", "0:a:%d" % audio_index, "-ac", "1", "-ar", str(SR),
+                      "-f", "f32le", "-c:a", "pcm_f32le", "pipe:1"])
+        samples = np.frombuffer(out.stdout, dtype=np.float32).copy()   # своя копия —
+        del out                                                        # отпустить bytes ffmpeg
         return self.transcribe_samples(samples, progress=progress, word_cb=word_cb, cancel=cancel)

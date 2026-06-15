@@ -13,6 +13,8 @@ AttributeError: 'NoneType' object has no attribute 'write'. Глушим их
 import os as _os
 import sys as _sys
 
+__version__ = "1.5.0"   # единственный источник версии (About и сборка берут отсюда)
+
 # Прогресс-бары и телеметрия HuggingFace — выключить (нет консоли, не нужны)
 _os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 _os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")

@@ -41,3 +41,28 @@ def test_compute_zone_params_widen_edges():
     wide = compute_zone(mono, sr, 0.5, 1.0, params=ZoneParams.from_edge_pct(25))
     # больше % краёв -> позже старт глушения (слышно больше начала слова)
     assert wide[0] >= narrow[0]
+
+
+def test_compute_zone_trims_when_ctc_marks_fall_outside_word():
+    """Метки CTC уехали наружу (старт раньше слова, конец позже) — зона должна
+    подтянуться ВНУТРЬ к реальному звуку, а не глушить тишину до/после слова.
+    Регрессия на «глушит чуть раньше/позже»: раньше refine шёл только наружу."""
+    sr = 16000
+    mono = np.zeros(sr * 3, dtype=np.float32)
+    rng = np.random.default_rng(0)
+    mono[int(1.0 * sr):int(1.5 * sr)] = (rng.standard_normal(int(0.5 * sr)) * 0.3).astype(np.float32)
+    zs, ze = compute_zone(mono, sr, 0.88, 1.62)        # слово реально 1.0–1.5
+    assert zs >= 0.95, f"начало зоны не подтянуто внутрь: {zs:.3f} (ожидалось ~1.0)"
+    assert ze <= 1.55, f"конец зоны не подтянут внутрь: {ze:.3f} (ожидалось ~1.5)"
+    assert zs < ze
+
+
+def test_compute_zone_extends_when_ctc_marks_inside_word():
+    """Метки CTC внутри слова — поведение прежнее: зона расширяется к краям."""
+    sr = 16000
+    mono = np.zeros(sr * 3, dtype=np.float32)
+    rng = np.random.default_rng(1)
+    mono[int(1.0 * sr):int(1.5 * sr)] = (rng.standard_normal(int(0.5 * sr)) * 0.3).astype(np.float32)
+    zs, ze = compute_zone(mono, sr, 1.10, 1.40)        # метки занижены внутрь слова
+    assert zs <= 1.12 and ze >= 1.38                    # дотянулись наружу к настоящим краям
+    assert 0.98 <= zs and ze <= 1.52                    # но не вылезли за слово

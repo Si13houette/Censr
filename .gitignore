@@ -1,4 +1,4 @@
-﻿.venv/
+.venv/
 venv/
 env/
 __pycache__/
@@ -10,8 +10,12 @@ __pycache__/
 build/
 dist/
 *.manifest
+*.spec
 models/
+ffmpeg/
 packaging/ffmpeg/
+installer/
+outputs/
 *.log
 censr_error.log
 *.report.json

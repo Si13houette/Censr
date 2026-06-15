@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -34,23 +35,76 @@ def _ff_path(name: str) -> str:
     return name
 
 
-def _run_ff(cmd: list[str], *, input: bytes | None = None, text: bool = False):
-    """subprocess.run для ffmpeg/ffprobe с человекочитаемыми ошибками."""
+# Живые дочерние процессы ffmpeg/ffprobe: чтобы отмена могла снять
+# непрерываемый энкод (kill_active_ff), а не ждать его завершения.
+_ACTIVE: set = set()
+_ACTIVE_LOCK = threading.Lock()
+
+
+def kill_active_ff() -> None:
+    """Убить все запущенные ffmpeg/ffprobe (вызывается при отмене из GUI).
+
+    Прибитый процесс даст ненулевой код возврата → run_ff поднимет AudioError,
+    которую вызывающая сторона трактует как отмену (если ставила флаг cancel)."""
+    with _ACTIVE_LOCK:
+        procs = list(_ACTIVE)
+    for p in procs:
+        try:
+            p.kill()
+        except Exception:
+            pass
+
+
+def run_ff(cmd: list[str], *, input: bytes | memoryview | None = None, text: bool = False,
+           timeout: float | None = None):
+    """Запуск ffmpeg/ffprobe с человекочитаемыми ошибками.
+
+    timeout (сек) — для коротких probe-вызовов: подвисший процесс (битый файл,
+    мёртвый сетевой путь) убивается, а не висит вечно."""
     cmd = list(cmd)
     cmd[0] = _ff_path(cmd[0])           # подменяем на bundled-бинарь в сборке
     try:
-        return subprocess.run(cmd, check=True, capture_output=True, input=input,
-                              text=text, creationflags=NO_WINDOW)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                creationflags=NO_WINDOW)
     except FileNotFoundError as e:
         raise AudioError(
             "Не найден «%s» в PATH. Установи ffmpeg: "
             "https://www.gyan.dev/ffmpeg/builds/" % cmd[0]) from e
-    except subprocess.CalledProcessError as e:
-        err = e.stderr
-        if isinstance(err, (bytes, bytearray)):
-            err = err.decode("utf-8", "replace")
-        raise AudioError("%s: ошибка (%s)\n%s" % (cmd[0], e.returncode,
-                                                  (err or "").strip()[-800:])) from e
+    with _ACTIVE_LOCK:
+        _ACTIVE.add(proc)
+    try:
+        try:
+            out, err = proc.communicate(input=input, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            proc.kill()
+            proc.communicate()
+            raise AudioError("%s: не ответил за %s с (битый файл или недоступный путь?)"
+                             % (cmd[0], timeout)) from e
+        except BaseException:       # Ctrl+C / MemoryError: не оставлять процесс-сироту,
+            proc.kill()             # пишущий в уже мёртвые пайпы
+            raise
+    finally:
+        with _ACTIVE_LOCK:
+            _ACTIVE.discard(proc)
+    if proc.returncode != 0:
+        err_s = err.decode("utf-8", "replace") if isinstance(err, (bytes, bytearray)) else (err or "")
+        raise AudioError("%s: ошибка (%s)\n%s" % (cmd[0], proc.returncode,
+                                                  err_s.strip()[-800:]))
+    res = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+    if text:
+        res = subprocess.CompletedProcess(
+            cmd, proc.returncode,
+            out.decode("utf-8", "replace") if isinstance(out, (bytes, bytearray)) else out,
+            err.decode("utf-8", "replace") if isinstance(err, (bytes, bytearray)) else err)
+    return res
+
+
+def ffmpeg_available() -> bool:
+    """Есть ли ffmpeg (PATH или bundled) — для строки статуса в GUI."""
+    import shutil
+    p = _ff_path("ffmpeg")
+    return bool(shutil.which(p)) or Path(p).exists()
 
 
 @dataclass
@@ -71,6 +125,8 @@ class AudioStream:
     bit_rate: int | None
     language: str | None = None
     title: str | None = None
+    dis_default: bool = False      # disposition: дорожка по умолчанию
+    dis_forced: bool = False       # disposition: forced
 
     def meta(self) -> "AudioMeta":
         return AudioMeta(self.sample_rate, self.channels, self.codec, self.bit_rate)
@@ -85,10 +141,10 @@ class AudioStream:
 
 
 def probe(path: str | Path) -> AudioMeta:
-    out = _run_ff(
-        ["ffprobe", "-v", "quiet", "-select_streams", "a:0", "-show_entries",
+    out = run_ff(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
          "stream=codec_name,sample_rate,channels,bit_rate", "-of", "json", str(path)],
-        text=True,
+        text=True, timeout=15,
     )
     streams = json.loads(out.stdout).get("streams") or []
     if not streams:
@@ -99,37 +155,50 @@ def probe(path: str | Path) -> AudioMeta:
                      int(br) if br else None)
 
 
-def list_audio_streams(path: str | Path) -> list[AudioStream]:
+# поля ffprobe для разбора аудиодорожки — единый источник для list_audio_streams
+# и GUI-пробы (_ProbeTask): копии парсера расходились бы молча
+STREAM_ENTRIES = ("stream=codec_name,sample_rate,channels,bit_rate"
+                  ":stream_tags=language,title:stream_disposition=default,forced")
+
+
+def stream_from_probe(i: int, s: dict) -> AudioStream:
+    """dict из ffprobe-json (STREAM_ENTRIES) → AudioStream."""
+    br = s.get("bit_rate")
+    tags = s.get("tags") or {}
+    dis = s.get("disposition") or {}
+    return AudioStream(
+        index=i, codec=s.get("codec_name", ""),
+        sample_rate=int(s.get("sample_rate") or 0),
+        channels=int(s.get("channels") or 0),
+        bit_rate=int(br) if br else None,
+        language=tags.get("language"), title=tags.get("title"),
+        dis_default=bool(dis.get("default", 0)),
+        dis_forced=bool(dis.get("forced", 0)))
+
+
+def list_audio_streams(path: str | Path, timeout: float | None = 15) -> list[AudioStream]:
     """Все аудиодорожки контейнера по порядку (для выбора, что обрабатывать)."""
-    out = _run_ff(
-        ["ffprobe", "-v", "quiet", "-select_streams", "a", "-show_entries",
-         "stream=codec_name,sample_rate,channels,bit_rate:stream_tags=language,title",
-         "-of", "json", str(path)],
-        text=True,
+    out = run_ff(
+        ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
+         STREAM_ENTRIES, "-of", "json", str(path)],
+        text=True, timeout=timeout,
     )
     streams = json.loads(out.stdout).get("streams") or []
-    res: list[AudioStream] = []
-    for i, s in enumerate(streams):
-        br = s.get("bit_rate")
-        tags = s.get("tags") or {}
-        res.append(AudioStream(
-            index=i, codec=s.get("codec_name", ""),
-            sample_rate=int(s.get("sample_rate") or 0),
-            channels=int(s.get("channels") or 0),
-            bit_rate=int(br) if br else None,
-            language=tags.get("language"), title=tags.get("title")))
-    return res
+    return [stream_from_probe(i, s) for i, s in enumerate(streams)]
 
 
 def decode(path: str | Path, meta: AudioMeta, index: int = 0) -> np.ndarray:
     """Оригинальное качество: float32, native sample rate, все каналы. Shape (n, ch).
 
     index — порядковый номер аудиодорожки (0:a:index)."""
-    out = _run_ff(
-        ["ffmpeg", "-v", "quiet", "-i", str(path), "-map", "0:a:%d" % index,
+    out = run_ff(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:%d" % index,
          "-ac", str(meta.channels), "-f", "f32le", "-c:a", "pcm_f32le", "pipe:1"],
     )
     data = np.frombuffer(out.stdout, dtype=np.float32)
+    if data.size == 0:                  # пустой поток — раньше молча «успешно» копировался
+        raise AudioError("Пустая аудиодорожка (0 сэмплов) — битый или обрезанный файл: %s"
+                         % path)
     if meta.channels < 1 or data.size % meta.channels:
         raise AudioError("Не удалось разобрать каналы (%d) дорожки: %s"
                          % (meta.channels, path))
@@ -162,35 +231,57 @@ _ENCODERS = {
 def _audio_args(meta: AudioMeta) -> list[str]:
     """Аргументы кодека/битрейта для энкода аудио в исходном формате."""
     args = list(_ENCODERS.get(meta.codec, []))  # неизвестный кодек — ffmpeg выберет по расширению
-    if meta.bit_rate and meta.codec in ("mp3", "aac", "opus", "vorbis"):
+    # ac3/eac3 — честный CBR: без -b:a ffmpeg молча уронит 640k → 448k/96k
+    if meta.bit_rate and meta.codec in ("mp3", "aac", "opus", "vorbis", "ac3", "eac3"):
         args += ["-b:a", str(meta.bit_rate)]
     return args
 
 
-def encode(samples: np.ndarray, meta: AudioMeta, dst: str | Path) -> None:
-    _run_ff(
-        ["ffmpeg", "-v", "quiet", "-y", "-f", "f32le", "-ar", str(meta.sample_rate),
-         "-ac", str(meta.channels), "-i", "pipe:0", *_audio_args(meta), str(dst)],
-        input=samples.astype(np.float32, copy=False).tobytes(),
-    )
+# контейнеры, умеющие обложку-attached_pic (для переноса cover art)
+_COVER_OK = {".mp3", ".flac", ".m4a", ".mp4", ".m4b"}
+
+
+def _pcm_view(samples: np.ndarray) -> memoryview:
+    """PCM float32 как bytes-view для stdin ffmpeg — без .tobytes():
+    тот делал полную копию (~2.7 ГБ лишнего пика на 2-часовом стерео)."""
+    return memoryview(np.ascontiguousarray(samples, dtype=np.float32)).cast("B")
+
+
+def encode(samples: np.ndarray, meta: AudioMeta, dst: str | Path,
+           src: str | Path | None = None) -> None:
+    """PCM → dst в исходном кодеке/битрейте.
+
+    src — файл-донор метаданных: глобальные теги (артист/альбом/…) и
+    обложка-attached_pic переносятся в выход (быстрый путь раньше молча
+    терял ID3/обложку). Для временных дорожек мультитрек-пути src не нужен —
+    метаданные сохранит финальный мультиплекс."""
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(meta.sample_rate),
+           "-ac", str(meta.channels), "-i", "pipe:0"]
+    extra: list[str] = []
+    if src is not None:
+        cmd += ["-i", str(src)]
+        extra += ["-map", "0:a", "-map_metadata", "1"]
+        if Path(dst).suffix.lower() in _COVER_OK:
+            extra += ["-map", "1:v?", "-c:v", "copy"]   # обложка (если есть)
+    run_ff(cmd + [*_audio_args(meta), *extra, str(dst)], input=_pcm_view(samples))
 
 
 def write_wav(samples: np.ndarray, meta: AudioMeta, dst: str | Path) -> None:
     """Быстрый PCM-wav (для повторного распознавания уже заглушенного звука)."""
-    _run_ff(
-        ["ffmpeg", "-v", "quiet", "-y", "-f", "f32le", "-ar", str(meta.sample_rate),
+    run_ff(
+        ["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ar", str(meta.sample_rate),
          "-ac", str(meta.channels), "-i", "pipe:0", "-c:a", "pcm_s16le", str(dst)],
-        input=samples.astype(np.float32, copy=False).tobytes(),
+        input=_pcm_view(samples),
     )
 
 
 def has_video_stream(path: str | Path) -> bool:
     """Есть ли в файле настоящая видеодорожка (а не обложка-картинка)."""
-    out = _run_ff(
-        ["ffprobe", "-v", "quiet", "-select_streams", "v",
+    out = run_ff(
+        ["ffprobe", "-v", "error", "-select_streams", "v",
          "-show_entries", "stream=codec_type:stream_disposition=attached_pic",
          "-of", "json", str(path)],
-        text=True,
+        text=True, timeout=15,
     )
     try:
         streams = json.loads(out.stdout).get("streams") or []
@@ -218,9 +309,11 @@ def mux_audio_tracks(src: str | Path, dst: str | Path, plan: list[dict],
 
     plan — по одному элементу на выходную аудиодорожку, в нужном порядке:
       {"copy": i}                  — скопировать i-ю исходную аудиодорожку как есть
-      {"file": path, "language": l}— взять аудио из готового (зацензуренного) файла
-    Видео и копируемые дорожки идут без перекодирования (-c copy)."""
-    cmd = ["ffmpeg", "-v", "quiet", "-y", "-i", str(src)]
+      {"file": path, "language": l, "title": t, "disposition": "default+forced"}
+                                   — взять аудио из готового (зацензуренного) файла
+    Видео, субтитры, вложения (шрифты mkv) и копируемые дорожки идут без
+    перекодирования (-c copy) — раньше сабы и вложения молча выбрасывались."""
+    cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(src)]
     for item in plan:
         if "file" in item:
             cmd += ["-i", str(item["file"])]
@@ -235,9 +328,16 @@ def mux_audio_tracks(src: str | Path, dst: str | Path, plan: list[dict],
             in_idx += 1
             if item.get("language"):
                 meta_args += ["-metadata:s:a:%d" % out_a, "language=%s" % item["language"]]
+            if item.get("title"):
+                meta_args += ["-metadata:s:a:%d" % out_a, "title=%s" % item["title"]]
+            if item.get("disposition"):
+                meta_args += ["-disposition:a:%d" % out_a, item["disposition"]]
+    maps += ["-map", "0:s?", "-map", "0:t?"]    # субтитры и вложения — копией
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    _run_ff(cmd + maps + ["-c", "copy", "-map_metadata", "0"] + meta_args + [str(dst)])
+    if dst.suffix.lower() in (".mp4", ".m4a", ".m4v", ".mov"):
+        meta_args += ["-strict", "-2"]          # flac-в-mp4 (наш dts→flac) — experimental
+    run_ff(cmd + maps + ["-c", "copy", "-map_metadata", "0"] + meta_args + [str(dst)])
 
 
 def merge_zones(zones: list[tuple[float, float]], gap: float = 0.05) -> list[tuple[float, float]]:
@@ -313,12 +413,14 @@ def apply_censor(samples: np.ndarray, sr: int, zones: list[tuple[float, float]],
         seg = out[w0:w1]
         seg *= env[:, None]
         if mode == "beep":
-            t = np.arange(w0, w1, dtype=np.float32) / sr      # абсолютное время — фаза как раньше
+            # фаза строго в float64: float32 теряет целые уже после 2^24-го сэмпла
+            # (≈6 мин при 48 кГц) — бип на длинных файлах вырождался в тишину
+            t = np.arange(w0, w1, dtype=np.float64) / sr      # абсолютное время — фаза непрерывна
             beep = (BEEP_LEVEL * np.sin(2 * np.pi * BEEP_HZ * t)).astype(np.float32)
             seg += (beep * (1.0 - env))[:, None]              # кроссфейд бипа той же огибающей
         elif mode == "noise":
             noise = rng.standard_normal(w1 - w0).astype(np.float32)
-            if k > 1:
+            if 1 < k <= w1 - w0:    # окно короче ядра (доли мс) — convolve вернул бы массив длины k
                 noise = np.convolve(noise, np.ones(k, dtype=np.float32) / k, mode="same")
             noise /= (float(noise.std()) + 1e-9)
             seg += (NOISE_LEVEL * noise * (1.0 - env))[:, None]   # шум только в заглушенных зонах

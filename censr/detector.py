@@ -17,10 +17,11 @@
 from __future__ import annotations
 
 import re
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 
-__all__ = ["ProfanityDetector", "Match"]
+__all__ = ["ProfanityDetector", "Match", "prewarm"]
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,31 @@ def _anchored_span(norm: str) -> tuple:
     return ((0, min(m.end() + 4, len(norm))),)
 
 
+_MORPH = None
+_MORPH_LOCK = threading.Lock()
+
+
+def _shared_morph():
+    """Единый MorphAnalyzer на процесс. Его построение (загрузка словаря
+    OpenCorpora) — самая дорогая часть инициализации детектора (~0.5–1.5 с),
+    а раньше он строился заново на КАЖДЫЙ запуск обработки. parse() — это
+    неизменяемые словарные запросы, поэтому один экземпляр безопасно
+    переиспользовать между прогонами и потоками."""
+    global _MORPH
+    if _MORPH is None:
+        with _MORPH_LOCK:
+            if _MORPH is None:
+                import pymorphy3  # noqa: PLC0415
+                _MORPH = pymorphy3.MorphAnalyzer()
+    return _MORPH
+
+
+def prewarm() -> None:
+    """Построить словарь заранее (фоновая предзагрузка в GUI), чтобы первый
+    «Начать» не ждал pymorphy3."""
+    _shared_morph()
+
+
 class ProfanityDetector:
     def __init__(self, *, use_morphology: bool = True, use_fuzzy: bool = True,
                  extra_words: set[str] | None = None, whitelist: set[str] | None = None):
@@ -126,8 +152,7 @@ class ProfanityDetector:
         self.use_fuzzy = use_fuzzy
         self._morph = None
         if use_morphology:
-            import pymorphy3  # noqa: PLC0415
-            self._morph = pymorphy3.MorphAnalyzer()
+            self._morph = _shared_morph()
         if use_fuzzy:
             from rapidfuzz.distance import Levenshtein  # noqa: PLC0415
             self._lev = Levenshtein

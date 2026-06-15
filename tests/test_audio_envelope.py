@@ -58,7 +58,8 @@ def _reference(samples, sr, zones, mode):
     out = samples.astype(np.float32).copy()
     out *= env[:, None]
     if mode == "beep":
-        t = np.arange(n, dtype=np.float32) / sr
+        # фаза в float64 — как в боевом коде (float32 вырождается после 2^24 сэмплов)
+        t = np.arange(n, dtype=np.float64) / sr
         beep = (BEEP_LEVEL * np.sin(2 * np.pi * BEEP_HZ * t)).astype(np.float32)
         out += (beep * (1.0 - env))[:, None]
     return out
@@ -75,6 +76,20 @@ def test_apply_censor_zonal_matches_fullfile_reference(mode):
     zones = [(0.005, 0.05), (1.0, 1.3), (2.4, 2.42), (4.97, 4.999)]
     got = apply_censor(samp.copy(), sr, zones, mode=mode)
     assert np.array_equal(got, _reference(samp, sr, zones, mode))
+
+
+def test_beep_alive_beyond_float32_precision():
+    """Бип не вырождается в DC-тишину за пределами 2^24-го сэмпла (баг-фикс:
+    float32-фаза становилась константной — на 2-часовом фильме бип молчал)."""
+    sr = 48000
+    n = 2 ** 24 + sr                                # зона за порогом точности float32
+    samp = np.zeros(n, dtype=np.float32)            # 1-D mono — экономим память
+    zs = (2 ** 24 + sr // 4) / sr
+    out = apply_censor(samp, sr, [(zs, zs + 0.2)], mode="beep")
+    seg = out[int((zs + 0.05) * sr):int((zs + 0.15) * sr)]
+    rms = float(np.sqrt((seg.astype(np.float64) ** 2).mean()))
+    assert rms > BEEP_LEVEL * 0.5, f"бип мёртв: rms={rms:.4f}"
+    assert seg.min() < -BEEP_LEVEL * 0.9 and seg.max() > BEEP_LEVEL * 0.9
 
 
 def test_apply_censor_accepts_1d_mono():

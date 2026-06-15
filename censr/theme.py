@@ -1,21 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Тема Censr v6 «тихий терминал»: тёмный фон, мятный акцент, моноширинные
-данные по колонкам, волосяные разделители вместо карточек."""
+"""Тема Censr v7 «quiet tech»: почти чёрный фон, индиго-акцент, тонкие рамки
+и тихая SaaS-эстетика; моноширинный шрифт остаётся только у данных
+(номера, таймкоды, длительности)."""
 
 from __future__ import annotations
 
-BG = "#131519"          # тёмный, чуть тёплый
-SURFACE = "#1b1e23"     # поля ввода, диалоги
-HAIR = "#1e2127"        # волосяные линии
-TEXT = "#e7ecf2"
-DIM = "#5e6b7a"
-FAINT = "#3a4149"       # очень тусклый (очередь, прочерки)
-ACCENT = "#5ad19b"      # мятный
-ACCENT_HOVER = "#6fe0ad"
-ACCENT_DOWN = "#46b986"
-ACCENT_BG = "#173026"   # мятная подложка (чипы, активный сегмент)
-ON_ACCENT = "#04140a"
+BG = "#0a0a0b"          # почти чёрный
+SURFACE = "#121215"     # поля ввода, чипы, тосты
+HAIR = "#1c1c21"        # волосяные линии
+BORDER = "#232327"      # рамки кнопок/чипов (чуть ярче волосяной)
+TEXT = "#ededf0"
+DIM = "#85858f"
+FAINT = "#55555e"       # очень тусклый (очередь, прочерки)
+ACCENT = "#9aa4f0"      # светлый индиго — текст, иконки, счётчики
+ACCENT_HOVER = "#b6bdf5"
+ACCENT_DOWN = "#7c87e0"
+ACCENT_BG = "rgba(94, 106, 210, 0.16)"   # индиго-подложка (чипы, активный сегмент)
+ACCENT_BRD = "#3a3f63"  # рамка активного чипа/бейджа
+PRIMARY = "#5e6ad2"     # индиго — заливка главных кнопок
+PRIMARY_HOVER = "#6d79e0"
+PRIMARY_DOWN = "#4f5ac2"
+PRIMARY_EDGE = "#7c87e0"  # светлая кромка primary-кнопки
+ON_ACCENT = "#ffffff"
+GREEN = "#4ade80"       # успех (галочки, точка «готово»)
 RED = "#e5686d"
+AMBER = "#fbbf24"       # предупреждение/стоп (тот же, что у бейджа «похоже?»)
 
 MONO = '"JetBrains Mono", "Cascadia Code", "Consolas", monospace'
 SANS = '"Segoe UI Variable", "Segoe UI", sans-serif'
@@ -28,36 +37,33 @@ QSS = f"""
 }}
 QMainWindow, QDialog {{ background: {BG}; }}
 
-#wordmark {{ font-family: {MONO}; font-size: 14px; letter-spacing: 1px; color: {TEXT}; }}
+#wordmark {{ font-family: {MONO}; font-size: 14px; font-weight: 700; letter-spacing: 1px; color: {TEXT}; }}
 #topLink {{
     background: transparent;
     border: none;
     color: {DIM};
-    font-family: {MONO};
     font-size: 12px;
     padding: 6px 8px;
     border-radius: 6px;
 }}
-#topLink:hover {{ color: {ACCENT}; }}
+#topLink:hover {{ color: {TEXT}; }}
 
-#heroHint {{ color: {DIM}; font-size: 11px; font-family: {MONO}; }}
-#pvTitle {{ font-size: 22px; font-weight: 300; color: {TEXT}; }}
-#pvLine {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
+#heroHint {{ color: {DIM}; font-size: 12px; }}
+#pvTitle {{ font-size: 22px; font-weight: 600; color: {TEXT}; }}
 #ghostBtn {{
-    background: transparent;
-    border: 1px solid {HAIR};
+    background: {SURFACE};
+    border: 1px solid {BORDER};
     border-radius: 10px;
-    color: {TEXT};
-    font-family: {MONO};
+    color: #b9b9c4;
     font-size: 12px;
     padding: 12px 18px;
 }}
-#ghostBtn:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
+#ghostBtn:hover {{ border-color: {ACCENT_BRD}; color: {TEXT}; }}
 
 QPushButton {{
     background: transparent;
-    border: 1px solid {HAIR};
-    border-radius: 8px;
+    border: 1px solid {BORDER};
+    border-radius: 9px;
     padding: 9px 18px;
     color: {TEXT};
 }}
@@ -66,19 +72,18 @@ QPushButton:pressed {{ background: {SURFACE}; }}
 QPushButton:disabled {{ color: {FAINT}; border-color: {SURFACE}; }}
 
 QPushButton#primary {{
-    background: {ACCENT};
+    background: {PRIMARY};
     color: {ON_ACCENT};
-    border: none;
-    font-family: {MONO};
-    font-weight: 700;
+    border: 1px solid {PRIMARY_EDGE};
+    font-weight: 600;
     font-size: 13px;
     letter-spacing: 1px;
     padding: 13px 24px;
-    border-radius: 9px;
+    border-radius: 10px;
 }}
-QPushButton#primary:hover {{ background: {ACCENT_HOVER}; }}
-QPushButton#primary:pressed {{ background: {ACCENT_DOWN}; }}
-QPushButton#primary:disabled {{ background: {SURFACE}; color: {DIM}; }}
+QPushButton#primary:hover {{ background: {PRIMARY_HOVER}; }}
+QPushButton#primary:pressed {{ background: {PRIMARY_DOWN}; }}
+QPushButton#primary:disabled {{ background: {SURFACE}; color: {DIM}; border-color: {SURFACE}; }}
 
 QScrollArea {{ border: none; background: transparent; }}
 #fileList {{ background: transparent; }}
@@ -88,8 +93,8 @@ QScrollArea {{ border: none; background: transparent; }}
     border: none;
     border-bottom: 1px solid {HAIR};
 }}
-#rowNum {{ font-family: {MONO}; font-size: 11px; font-weight: 700; color: {ACCENT}; }}
-#fileName {{ font-family: {MONO}; font-size: 12px; color: {TEXT}; }}
+#rowNum {{ font-family: {MONO}; font-size: 11px; font-weight: 700; color: {FAINT}; }}
+#fileName {{ font-size: 13px; font-weight: 600; color: {TEXT}; }}
 #colDur {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
 #rowClose {{
     background: transparent;
@@ -105,10 +110,10 @@ QScrollArea {{ border: none; background: transparent; }}
     background: transparent;
 }}
 #rowExpand[open="false"] {{ background: {ACCENT_BG}; }}
-#rowExpand[open="false"]:hover {{ background: #1d3a2d; }}
-#rowExpand[open="true"] {{ background: {ACCENT}; }}
-#rowExpand[open="true"]:hover {{ background: {ACCENT_HOVER}; }}
-#rowTracks {{ font-family: {MONO}; font-size: 10px; color: {DIM}; }}
+#rowExpand[open="false"]:hover {{ background: rgba(94, 106, 210, 0.28); }}
+#rowExpand[open="true"] {{ background: {PRIMARY}; }}
+#rowExpand[open="true"]:hover {{ background: {PRIMARY_HOVER}; }}
+#rowTracks {{ font-family: {MONO}; font-size: 11px; color: {ACCENT}; }}
 #trackPanel {{ background: transparent; }}
 #trackHint {{ font-size: 11px; color: {DIM}; }}
 #trackAll {{
@@ -124,23 +129,22 @@ QScrollArea {{ border: none; background: transparent; }}
 #trackCheck::indicator {{
     width: 16px; height: 16px;
     border-radius: 5px;
-    border: 1px solid {DIM};
+    border: 1px solid #33333b;
     background: {SURFACE};
 }}
 #trackCheck::indicator:hover {{ border-color: {ACCENT}; }}
 #trackCheck::indicator:checked {{
-    border: 1px solid {ACCENT};
-    background: {ACCENT};
+    border: 1px solid {PRIMARY_EDGE};
+    background: {PRIMARY};
     image: url(__CHECK_ICON__);
 }}
-#trackCheck::indicator:checked:hover {{ background: {ACCENT_HOVER}; border-color: {ACCENT_HOVER}; }}
+#trackCheck::indicator:checked:hover {{ background: {PRIMARY_HOVER}; border-color: {PRIMARY_HOVER}; }}
 #linkAdd {{
     background: transparent;
     border: none;
     color: {ACCENT};
-    font-family: {MONO};
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     padding: 4px 6px;
 }}
 #linkAdd:hover {{ color: {ACCENT_HOVER}; }}
@@ -148,142 +152,166 @@ QScrollArea {{ border: none; background: transparent; }}
     background: transparent;
     border: none;
     color: {FAINT};
-    font-family: {MONO};
     font-size: 11px;
     padding: 4px 6px;
 }}
 #linkDim:hover {{ color: {DIM}; }}
 
-QProgressBar {{
-    background: {HAIR};
-    border: none;
-    border-radius: 1px;
-    max-height: 2px;
-}}
-QProgressBar::chunk {{ background: {ACCENT}; }}
-
-QComboBox, QLineEdit, QSpinBox, QPlainTextEdit {{
+QLineEdit, QPlainTextEdit {{
     background: {SURFACE};
-    border: 1px solid {HAIR};
-    border-radius: 8px;
+    border: 1px solid {BORDER};
+    border-radius: 9px;
     padding: 8px 10px;
     color: {TEXT};
-    selection-background-color: {ACCENT};
+    selection-background-color: {PRIMARY};
     selection-color: {ON_ACCENT};
 }}
-QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus {{ border-color: {ACCENT}; }}
-QComboBox::drop-down {{ border: none; width: 24px; }}
-QComboBox QAbstractItemView {{
-    background: {SURFACE};
-    border: 1px solid {HAIR};
-    border-radius: 8px;
-    selection-background-color: #173026;
-}}
+QLineEdit:focus, QPlainTextEdit:focus {{ border-color: {ACCENT_BRD}; }}
 
-QSlider::groove:horizontal {{ background: {HAIR}; height: 4px; border-radius: 2px; }}
-QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
-QSlider::handle:horizontal {{
-    background: {ACCENT};
-    width: 16px; height: 16px;
-    margin: -6px 0;
-    border-radius: 8px;
-}}
-QSlider::handle:horizontal:hover {{ background: {ACCENT_HOVER}; }}
-
-#footerNote {{ color: {DIM}; font-size: 11px; font-family: {MONO}; }}
+#footerNote {{ color: {DIM}; font-size: 11px; }}
 
 QScrollBar:vertical {{ background: transparent; width: 8px; margin: 2px; }}
-QScrollBar::handle:vertical {{ background: {HAIR}; border-radius: 4px; min-height: 30px; }}
+QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 4px; min-height: 30px; }}
 QScrollBar::handle:vertical:hover {{ background: {DIM}; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 
 QToolTip {{
     background: {SURFACE};
     color: {TEXT};
-    border: 1px solid {HAIR};
+    border: 1px solid {BORDER};
     padding: 6px;
 }}
 QMessageBox {{ background: {BG}; }}
 
 #dlgOk {{
-    background: {ACCENT};
+    background: {PRIMARY};
     color: {ON_ACCENT};
-    border: none;
-    border-radius: 8px;
-    font-family: {MONO};
-    font-weight: 700;
-    font-size: 11px;
+    border: 1px solid {PRIMARY_EDGE};
+    border-radius: 9px;
+    font-weight: 600;
+    font-size: 12px;
     padding: 8px 20px;
 }}
-#dlgOk:hover {{ background: {ACCENT_HOVER}; }}
-#dlgOk:pressed {{ background: {ACCENT_DOWN}; }}
+#dlgOk:hover {{ background: {PRIMARY_HOVER}; }}
+#dlgOk:pressed {{ background: {PRIMARY_DOWN}; }}
 #dlgCancel {{
-    background: transparent;
-    border: 1px solid {HAIR};
-    border-radius: 8px;
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 9px;
     color: {DIM};
-    font-family: {MONO};
-    font-size: 11px;
+    font-size: 12px;
     padding: 8px 16px;
 }}
 #dlgCancel:hover {{ border-color: {DIM}; color: {TEXT}; }}
-#dlgFrame {{ background: {BG}; border: 1px solid {HAIR}; border-radius: 12px; }}
+#dlgFrame {{ background: #0f0f12; border: 1px solid #2a2a31; border-radius: 16px; }}
 #dlgBar {{ background: transparent; }}
 #dlgClose {{
     background: transparent;
     border: none;
     color: {DIM};
-    font-family: {MONO};
     font-size: 13px;
     border-radius: 7px;
 }}
 #dlgClose:hover {{ background: #c0392b; color: #fff; }}
-#dlgTitle {{ font-family: {MONO}; font-size: 15px; color: {TEXT}; }}
-#dlgSub {{ font-family: {MONO}; font-size: 10px; color: {DIM}; }}
-#dlgKey {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
-#aboutTag {{ font-family: {SANS}; font-size: 17px; font-weight: 300; color: {TEXT}; }}
-#aboutChk {{ font-family: {MONO}; font-size: 13px; font-weight: 700; color: {ACCENT}; }}
-#aboutItem {{ font-family: {MONO}; font-size: 12px; color: {TEXT}; }}
-#aboutVer {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
-#aboutLink {{ font-family: {MONO}; font-size: 13px; color: {ACCENT}; }}
-#secTitle {{ font-family: {MONO}; font-size: 12px; color: {TEXT}; }}
-#secCount {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
-#doneOpen {{ background: transparent; border: none; border-radius: 7px; }}
-#doneOpen:hover {{ background: rgba(90, 209, 155, 0.22); }}
-#doneOpen:pressed {{ background: rgba(90, 209, 155, 0.36); }}
-#rcptHdr {{ font-family: {MONO}; font-size: 9px; color: {FAINT}; }}
-#rcptHead {{ font-family: {MONO}; font-size: 13px; color: {ACCENT}; letter-spacing: 2px; }}
-#rcptDash {{ background: transparent; border: none; border-top: 1px dashed {FAINT}; }}
-#rcptName {{ font-family: {MONO}; font-size: 12px; color: {TEXT}; }}
+#dlgTitle {{ font-size: 15px; font-weight: 700; color: {TEXT}; }}
+#dlgSub {{ font-size: 11px; color: {DIM}; }}
+#dlgKey {{ font-size: 12px; color: {DIM}; }}
+#aboutTag {{ font-size: 11px; font-weight: 600; letter-spacing: 2px; color: {FAINT}; }}
+#aboutChk {{ font-size: 13px; font-weight: 700; color: {ACCENT}; }}
+#aboutItem {{ font-size: 13px; color: {TEXT}; }}
+#aboutVer {{ font-size: 11px; color: {DIM}; }}
+#aboutLink {{ font-size: 13px; font-weight: 600; color: {ACCENT}; }}
+#secTitle {{ font-size: 14px; font-weight: 700; color: {TEXT}; }}
+#secCount {{ font-size: 11px; color: {DIM}; }}
+#doneOpen {{ background: transparent; border: 1px solid {BORDER}; border-radius: 7px; }}
+#doneOpen:hover {{ border-color: {ACCENT_BRD}; background: {ACCENT_BG}; }}
+#doneOpen:pressed {{ background: rgba(94, 106, 210, 0.32); }}
+#rcptHdr {{ font-size: 9px; letter-spacing: 1px; color: {FAINT}; }}
+#rcptHead {{ font-size: 13px; font-weight: 700; color: {ACCENT}; letter-spacing: 2px; }}
+#rcptDash {{ background: transparent; border: none; border-top: 1px solid {HAIR}; }}
+#rcptName {{ font-size: 13px; font-weight: 600; color: {TEXT}; }}
 #rcptStat {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
-#rcptKvK {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
+#rcptCount {{ font-family: {MONO}; font-size: 12px; font-weight: 700; color: {ACCENT}; }}
+#rcptCountZero {{ font-family: {MONO}; font-size: 12px; color: {FAINT}; }}
+#okMark {{ font-size: 13px; font-weight: 700; color: {GREEN}; }}
+#heroSub {{ font-size: 13px; color: {DIM}; }}
+#rcptKvK {{ font-size: 11px; color: {DIM}; }}
 #rcptKvV {{ font-family: {MONO}; font-size: 11px; color: {TEXT}; }}
-#reviewBtn {{ background: {ACCENT_BG}; color: {ACCENT}; border: none; border-radius: 11px; font-size: 11px; padding: 4px 11px; }}
-#reviewBtn:hover {{ background: #1d3a2d; }}
-#reviewBtn:pressed {{ background: {ACCENT_DOWN}; color: {ON_ACCENT}; }}
-#rsRootBadge {{ background: {ACCENT_BG}; color: {ACCENT}; border-radius: 9px; font-size: 9px; padding: 2px 0; }}
-#rsRiskBadge {{ background: #3a2e12; color: #e0a13a; border-radius: 9px; font-size: 9px; padding: 2px 0; }}
+#reviewBtn {{ background: #1a1a20; color: {ACCENT}; border: 1px solid {ACCENT_BRD}; border-radius: 7px; font-size: 11px; font-weight: 600; padding: 4px 4px; }}
+#reviewBtn:hover {{ background: {ACCENT_BG}; }}
+#reviewBtn:pressed {{ background: {PRIMARY_DOWN}; color: {ON_ACCENT}; }}
+#rsRootBadge {{ background: #1a1a20; color: {ACCENT}; border: 1px solid {ACCENT_BRD}; border-radius: 7px; font-size: 9px; padding: 2px 0; }}
+#rsRiskBadge {{ background: #1f1a10; color: {AMBER}; border: 1px solid #4a3a12; border-radius: 7px; font-size: 9px; padding: 2px 0; }}
 #timeInput {{ font-family: {MONO}; font-size: 13px; }}
-#cancelTitle {{ font-family: {MONO}; font-size: 16px; color: #e0a13a; letter-spacing: 1px; }}
+#cancelTitle {{ font-size: 16px; font-weight: 600; color: {AMBER}; letter-spacing: 1px; }}
 QFrame#dlgSep {{ background: {HAIR}; max-height: 1px; min-height: 1px; border: none; }}
 #modeChip {{
-    background: transparent;
-    border: 1px solid {HAIR};
-    border-radius: 8px;
-    color: {DIM};
-    font-family: {MONO};
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 9px;
+    color: #a3a3b0;
     font-size: 12px;
     padding: 8px 14px;
     text-align: left;
 }}
 #modeChip:hover {{ border-color: {DIM}; }}
-#modeChip:checked {{ background: {ACCENT_BG}; border-color: {ACCENT_BG}; color: {ACCENT}; }}
-#pathLabel {{ font-family: {MONO}; font-size: 10px; color: {DIM}; padding: 2px 2px 0 0; }}
+#modeChip:checked {{ background: {ACCENT_BG}; border-color: {ACCENT_BRD}; color: #c7cdf8; }}
+#modeChip:disabled {{ color: {FAINT}; border-color: {SURFACE}; background: transparent; }}
+#pathLabel {{ font-size: 10px; color: {DIM}; padding: 2px 2px 0 0; }}
+
+#emptyTitle {{ font-size: 22px; font-weight: 700; color: #f8f8fa; }}
+#statusLine {{ font-size: 11px; color: {FAINT}; }}
+#linkPick {{
+    background: transparent;
+    border: none;
+    color: #c7cdf8;
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: underline;
+    padding: 4px 10px;
+}}
+#linkPick:hover {{ color: {ACCENT_HOVER}; }}
+#linkPick:pressed {{ color: {ACCENT_DOWN}; }}
+
+QPushButton#stopBtn {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    color: #b9b9c4;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 1px;
+    padding: 12px 24px;
+    border-radius: 10px;
+}}
+QPushButton#stopBtn:hover {{ border-color: {AMBER}; color: {AMBER}; }}
+QPushButton#stopBtn:disabled {{ border-color: {SURFACE}; color: {DIM}; }}
+
+#dropOverlay {{ background: rgba(10, 10, 11, 0.95); border: 1px dashed {PRIMARY_EDGE}; border-radius: 16px; }}
+#dropHint {{ font-size: 13px; color: {ACCENT}; background: transparent; border: none; }}
+#toast {{
+    background: {SURFACE};
+    border: 1px solid {BORDER};
+    border-radius: 10px;
+    color: {TEXT};
+    font-size: 12px;
+    padding: 9px 16px;
+}}
+
+#procSum {{ font-size: 12px; color: {DIM}; }}
+#procNameDim {{ font-size: 12px; color: {FAINT}; }}
+#procR {{ font-family: {MONO}; font-size: 11px; color: {DIM}; }}
+
+#reviewBtnDim {{ background: transparent; color: {DIM}; border: 1px solid {BORDER}; border-radius: 7px; font-size: 11px; padding: 4px 4px; }}
+#reviewBtnDim:hover {{ border-color: {DIM}; }}
+#ctxLine {{ font-size: 12px; color: {DIM}; }}
+#secWarn {{ font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {AMBER}; }}
+#secDim {{ font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {FAINT}; }}
+#errText {{ font-size: 11px; color: {RED}; }}
 """
 
 
 def _check_icon_path() -> str:
-    """Рисует тёмную галочку (для отмеченного мятного чекбокса) и возвращает путь.
+    """Рисует белую галочку (для отмеченного индиго-чекбокса) и возвращает путь.
     Путь с прямыми слэшами — так его понимает Qt StyleSheet."""
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QColor, QImage, QPainter, QPen
@@ -297,7 +325,7 @@ def _check_icon_path() -> str:
     img.fill(QColor(0, 0, 0, 0))
     pt = QPainter(img)
     pt.setRenderHint(QPainter.Antialiasing, True)
-    pen = QPen(QColor(ON_ACCENT))           # тёмная галочка на мятном фоне
+    pen = QPen(QColor(ON_ACCENT))           # белая галочка на индиго-фоне
     pen.setWidthF(3.2)
     pen.setCapStyle(Qt.RoundCap)
     pen.setJoinStyle(Qt.RoundJoin)
@@ -308,10 +336,27 @@ def _check_icon_path() -> str:
     return str(p).replace("\\", "/")
 
 
+def _load_fonts() -> None:
+    """Подхватить вшитые шрифты (fonts/*.ttf|otf рядом с программой), если они есть.
+    Без них семейства MONO/SANS молча падают на системные (Consolas/Segoe UI)."""
+    try:
+        from PySide6.QtGui import QFontDatabase
+
+        from .settings import app_base_dir
+        d = app_base_dir() / "fonts"
+        if not d.is_dir():
+            return
+        for f in sorted(d.glob("*.[ot]tf")):
+            QFontDatabase.addApplicationFont(str(f))
+    except Exception:
+        pass
+
+
 def apply(app) -> None:
     app.setStyle("Fusion")
+    _load_fonts()                  # вшитые шрифты (если поставлены) — до setStyleSheet
     try:
         qss = QSS.replace("__CHECK_ICON__", _check_icon_path())
     except Exception:
-        qss = QSS.replace("__CHECK_ICON__", "")   # без иконки чекбокс всё равно мятный
+        qss = QSS.replace("__CHECK_ICON__", "")   # без иконки чекбокс всё равно индиго
     app.setStyleSheet(qss)

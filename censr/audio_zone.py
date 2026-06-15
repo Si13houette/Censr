@@ -48,26 +48,55 @@ def _rms(seg: np.ndarray) -> float:
     return float(np.sqrt((seg ** 2).mean())) if len(seg) else 0.0
 
 
+TRIM_MAX_S = 0.2     # насколько далеко подтягивать метку, уехавшую в тишину
+
+
 def refine_onset(mono: np.ndarray, sr: int, start: float, limit: float, ref_rms: float) -> float:
-    """Реальное начало слова: от CTC-старта назад, пока энергия высокая."""
+    """Реальное начало слова рядом с CTC-стартом — поиск в ОБЕ стороны.
+
+    CTC-старт может оказаться ВНУТРИ слова (типично — старт занижен/запаздывает)
+    или СНАРУЖИ, в тишине перед словом. Поэтому: если у метки звук — идём назад
+    до тишины (расширяем зону к настоящему началу), если тишина — идём вперёд до
+    звука (обрезаем внутрь). Раньше проход был только наружу и слишком ранний
+    старт не подтягивался → глушило ещё до слова.
+    """
     thresh = max(RMS_FLOOR, RMS_REL * ref_rms)
-    i, lim, w = int(start * sr), max(int(limit * sr), 0), max(int(SCAN_STEP_S * sr), 1)
-    while i - w >= lim:
-        if _rms(mono[i - w:i]) < thresh:
-            break
-        i -= w
-    return i / sr
+    w = max(int(SCAN_STEP_S * sr), 1)
+    i0 = int(start * sr)
+    if _rms(mono[i0:i0 + w]) >= thresh:           # внутри звука → назад до тишины
+        lo, i = max(int(limit * sr), 0), i0
+        while i - w >= lo and _rms(mono[i - w:i]) >= thresh:
+            i -= w
+        return i / sr
+    hi, i = i0 + max(int(TRIM_MAX_S * sr), w), i0  # в тишине перед словом → вперёд до звука
+    while i + w <= hi:
+        if _rms(mono[i:i + w]) >= thresh:
+            return i / sr
+        i += w
+    return start                                  # звука рядом не нашли — не трогаем
 
 
 def refine_end(mono: np.ndarray, sr: int, end: float, limit: float, ref_rms: float) -> float:
-    """Реальный конец слова: от CTC-конца вперёд, пока энергия высокая."""
+    """Реальный конец слова рядом с CTC-концом — симметрично refine_onset.
+
+    CTC-конец почти всегда занижен (таймкод последней буквы) → обычно идём вперёд
+    до тишины. Но если конец уехал ЗА слово, в тишину — идём назад до звука
+    (обрезаем внутрь), иначе глушило бы после слова.
+    """
     thresh = max(RMS_FLOOR, RMS_REL * ref_rms)
-    i, lim, w = int(end * sr), min(int(limit * sr), len(mono)), max(int(SCAN_STEP_S * sr), 1)
-    while i + w <= lim:
-        if _rms(mono[i:i + w]) < thresh:
-            break
-        i += w
-    return i / sr
+    w = max(int(SCAN_STEP_S * sr), 1)
+    i0 = int(end * sr)
+    if _rms(mono[max(i0 - w, 0):i0]) >= thresh:   # внутри звука → вперёд до тишины
+        hi, i = min(int(limit * sr), len(mono)), i0
+        while i + w <= hi and _rms(mono[i:i + w]) >= thresh:
+            i += w
+        return i / sr
+    lo, i = max(i0 - max(int(TRIM_MAX_S * sr), w), 0), i0  # конец в тишине → назад до звука
+    while i - w >= lo:
+        if _rms(mono[i - w:i]) >= thresh:
+            return i / sr
+        i -= w
+    return end                                    # звука рядом не нашли — не трогаем
 
 
 def compute_zone(mono: np.ndarray, sr: int, start: float, end: float,
@@ -81,8 +110,11 @@ def compute_zone(mono: np.ndarray, sr: int, start: float, end: float,
     ref = _rms(mono[int(start * sr):max(int(end * sr), int(start * sr) + 1)])
     on_lim = (start - 0.25) if prev_end is None else max(prev_end - 0.02, start - 0.25)
     end_lim = (end + 0.4) if next_start is None else min(end + 0.4, next_start + 0.03)
-    onset = refine_onset(mono, sr, start, on_lim, ref)
-    wend = max(refine_end(mono, sr, end, end_lim, ref), end)
+    # подтянутые границы; клампим к середине CTC-спана — она заведомо внутри
+    # слова, так что зона не выродится, даже если обе метки уехали в тишину
+    mid = (start + end) / 2.0
+    onset = min(refine_onset(mono, sr, start, on_lim, ref), mid)
+    wend = max(refine_end(mono, sr, end, end_lim, ref), mid)
     if params.full:                        # максимальная очистка: всё слово, без краёв
         return onset, wend
     dur = wend - onset

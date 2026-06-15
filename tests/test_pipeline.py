@@ -137,3 +137,68 @@ def test_probe_no_audio_stream(tmp_path):
                     "-i", "color=c=black:s=16x16:d=1", "-frames:v", "1", str(png)], check=True)
     with pytest.raises(audio.AudioError):
         audio.probe(png)
+
+class _SampTr:
+    """Фейк с сэмпловым путём: записывает длительности отданных сегментов."""
+
+    model_id = "samp"
+
+    def __init__(self):
+        self.seg_secs = []
+
+    def transcribe_samples(self, samples, progress=None, word_cb=None,
+                           cancel=None, vad=True):
+        from censr.asr import SR as ASR_SR
+        self.seg_secs.append(len(samples) / ASR_SR)
+        words = [Word("блять", 1.0, 1.3)]
+        if word_cb:
+            word_cb(words)
+        if progress:
+            progress(1.0, 1.0)
+        return words
+
+    def transcribe_file(self, *a, **k):
+        raise AssertionError("сэмпловый путь не должен звать transcribe_file")
+
+
+@ffmpeg
+def test_single_decode_uses_samples_path(tmp_path):
+    """С soxr и transcribe_samples пайплайн не зовёт transcribe_file (один декод)."""
+    pytest.importorskip("soxr")
+    src = tmp_path / "in.wav"
+    _wav(src, dur=2.0, sr=44100)
+    tr = _SampTr()
+    rep = censor_file(src, tmp_path / "o.wav", tr, ProfanityDetector(), use_cache=False)
+    assert rep.flagged_words == 1
+    assert len(tr.seg_secs) == 1 and abs(tr.seg_secs[0] - 2.0) < 0.1
+
+
+@ffmpeg
+def test_thorough_pass_windows_only_around_zones(tmp_path):
+    """Тщательная очистка: проход 2 распознаёт только окно вокруг зоны,
+    а не весь файл (и не плодит дубли в счётчике)."""
+    pytest.importorskip("soxr")
+    src = tmp_path / "in.wav"
+    _wav(src, dur=30.0, sr=44100)
+    tr = _SampTr()
+    rep = censor_file(src, tmp_path / "o.wav", tr, ProfanityDetector(),
+                      use_cache=False, max_passes=2)
+    assert rep.flagged_words == 1              # слово одно, без дублей
+    assert len(tr.seg_secs) == 2               # проход 1 + окно прохода 2
+    assert tr.seg_secs[0] >= 29.0              # первый проход — весь файл
+    assert tr.seg_secs[1] <= 6.0               # второй — только ±2 c вокруг зоны
+
+
+@ffmpeg
+def test_defer_encode_finalize(tmp_path):
+    """defer_encode: файл появляется только после finalize(), отчёт — тот же."""
+    src = tmp_path / "in.wav"
+    _wav(src, dur=2.0)
+    dst = tmp_path / "o.wav"
+    words = [Word("блять", 0.8, 1.2)]
+    rep, fin = censor_file(src, dst, _FakeTr(words), ProfanityDetector(),
+                           use_cache=False, defer_encode=True)
+    assert fin is not None and not dst.exists()
+    assert rep.flagged_words == 1
+    assert fin() is rep
+    assert dst.exists()

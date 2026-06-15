@@ -11,15 +11,31 @@ import sys
 IS_WIN = sys.platform == "win32"
 
 
+def keep_awake(on: bool) -> None:
+    """Не дать системе уснуть во время обработки (Windows). on=False — снять.
+    Экран гасить не мешаем (ES_DISPLAY_REQUIRED не ставим): для обработки не важно."""
+    if not IS_WIN:
+        return
+    try:
+        import ctypes
+        ES_CONTINUOUS = 0x80000000
+        ES_SYSTEM_REQUIRED = 0x00000001
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | (ES_SYSTEM_REQUIRED if on else 0))
+    except Exception:
+        pass
+
+
 def apply_window_effects(widget) -> None:
     """Тёмный заголовок (Win10 1809+) и Mica-подложка (Win11 22H2+)."""
     if not IS_WIN:
         return
     try:
         import ctypes
-        hwnd = int(widget.winId())
-        dwm = ctypes.windll.dwmapi
-        TRUE = ctypes.c_int(1)
+        from ctypes import wintypes
+        hwnd = wintypes.HWND(int(widget.winId()))   # не c_int: HWND > 0x7FFFFFFF
+        dwm = ctypes.windll.dwmapi                  # давал OverflowError → эффекты
+        TRUE = ctypes.c_int(1)                      # молча пропадали на части машин
         # тёмный титлбар: атрибут 20 (до 1903 — 19)
         for attr in (20, 19):
             if dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(TRUE),
@@ -49,8 +65,12 @@ class TaskbarProgress:
 
             self._hwnd = int(widget.winId())
             ole32 = ctypes.windll.ole32
-            ole32.CoInitialize(None)
-            self._co_init = True
+            hr = ole32.CoInitialize(None)
+            # S_OK/S_FALSE — инициализировано; отрицательный HRESULT (например,
+            # RPC_E_CHANGED_MODE) — нет, и CoUninitialize звать нельзя
+            self._co_init = hr >= 0
+            if not self._co_init:
+                return
 
             class GUID(ctypes.Structure):
                 _fields_ = [("d1", wintypes.DWORD), ("d2", wintypes.WORD),
@@ -78,7 +98,8 @@ class TaskbarProgress:
             self._set_value = proto_value(vtbl[9])
             self._set_state = proto_state(vtbl[10])
             self._release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtbl[2])  # IUnknown::Release
-            proto_init(vtbl[3])(ptr)
+            if proto_init(vtbl[3])(ptr) < 0:   # HrInit не удался (нет таскбара/сессии) —
+                return                          # не врать, что _ok, на мёртвом интерфейсе
             self._ok = True
         except Exception:
             self._ok = False
@@ -86,7 +107,7 @@ class TaskbarProgress:
     def set(self, percent: int) -> None:
         if self._ok:
             try:
-                self._set_value(self._ptr, self._hwnd, max(0, min(100, percent)), 100)
+                self._set_value(self._ptr, self._hwnd, int(max(0, min(100, percent))), 100)
             except Exception:
                 pass
 
@@ -120,3 +141,9 @@ class TaskbarProgress:
             except Exception:
                 pass
             self._co_init = False
+
+    def __del__(self):
+        try:
+            self.close()         # подстраховка, если closeEvent не вызвался (жёсткий выход)
+        except Exception:
+            pass
