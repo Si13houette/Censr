@@ -1,0 +1,47 @@
+name: 🐞 Баг
+description: Сообщить об ошибке в работе Censr
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Опиши проблему. Что делал, что ожидал, что получил вместо этого.
+      placeholder: |
+        1. Открыл файл ...
+        2. Нажал «начать обработку»
+        3. Ожидал ..., но ...
+    validations:
+      required: true
+  - type: input
+    id: censr-version
+    attributes:
+      label: Версия Censr
+      placeholder: "1.5.0"
+    validations:
+      required: true
+  - type: input
+    id: windows-version
+    attributes:
+      label: Версия Windows
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: false
+  - type: dropdown
+    id: install-type
+    attributes:
+      label: Как установлено
+      options:
+        - Установщик (.exe)
+        - Портативная версия
+        - Из исходников (python -m censr)
+    validations:
+      required: false
+  - type: textarea
+    id: log
+    attributes:
+      label: Лог ошибки
+      description: Содержимое censr_error.log (лежит рядом с Censr.exe), если приложение упало.
+      render: text
+    validations:
+      required: false

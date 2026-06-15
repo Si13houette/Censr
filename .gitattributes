@@ -1,0 +1,17 @@
+# Нормализация переносов строк
+* text=auto eol=lf
+
+# Windows-скрипты — всегда CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.vbs   text eol=crlf
+*.iss   text eol=crlf
+
+# Бинарные файлы — без нормализации и diff
+*.png   binary
+*.ico   binary
+*.onnx  binary
+
+# Статистика языка: не считать модель и сборку кодом проекта
+models/**       linguist-vendored
+screenshots/**  linguist-documentation
